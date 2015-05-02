@@ -1,6 +1,6 @@
 /*
 chmod 777 /etc/passwd (32 bytes)
-Author: MMxM (@hc0d3r)
+Author: MMxM  (@hc0d3r)
 Sáb Mai  2 17:06:20 BRT 2015
 */
 
