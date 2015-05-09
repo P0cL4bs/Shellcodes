@@ -27,7 +27,7 @@ int 0x80
 
 ; mmap2
 
-mov dword ecx, [ esp+44 ] ; 0x3f4 - tamanho do arquivo
+mov dword ecx, [ esp+44 ] ; tamanho do arquivo
 mov al,	192 ; mmap2 system call	number
 mov edi, ebx ; move o fd pra edi
 
