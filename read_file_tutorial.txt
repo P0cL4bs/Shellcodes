@@ -5,7 +5,7 @@
 
  Autor> MMxM (@hc0d3r)
 
- Greetz < Msfc0der, Joridos, n4sss, trinity, Cyclone, Dennis, Kodo no kami,
+ Greetz < Msfc0der, Joridos, n4sss, kwrnel, Cyclone, Dennis, Kodo no kami,
         susp31t0virtual, xstpl, cooler, m0nad, Sir.Rafiki >
 
  [[[ Escrevendo shellcode para ler conteudo de arquivo ]]]
