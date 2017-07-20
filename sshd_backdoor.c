@@ -39,7 +39,7 @@ unsigned const char sc[] =
 ;
 
 int main(void){
-	printf("Shellcode lenght: %d\n", strlen(sc));
+	printf("Shellcode length: %d\n", strlen(sc));
 	__asm__ ("jmp sc");
 	return 0;
 }
